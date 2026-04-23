@@ -1,0 +1,20 @@
+# Build output
+/go-pathfinder
+*.exe
+*.test
+*.out
+*.prof
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+
+# Claude
+.claude/settings.local.json
+
+# OS
+.DS_Store
