@@ -25,3 +25,6 @@ video_to_gif.mov
 # Coverage reports
 coverage.out
 coverage.html
+
+# tokensave local DB
+.tokensave/
