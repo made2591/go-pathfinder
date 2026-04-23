@@ -18,3 +18,10 @@ go.work.sum
 
 # OS
 .DS_Store
+
+# Source recording (committed output is demo.gif, not the raw MOV)
+video_to_gif.mov
+
+# Coverage reports
+coverage.out
+coverage.html
