@@ -1,4 +1,4 @@
-.PHONY: build test fmt format lint fix run clean
+.PHONY: build test fmt format lint fix run clean coverage coverage-html
 
 build:
 	go build -o go-pathfinder .
@@ -21,3 +21,11 @@ run: build
 
 clean:
 	rm -f go-pathfinder
+
+coverage:
+	go test -coverprofile=coverage.out ./...
+	go tool cover -func=coverage.out
+
+coverage-html: coverage
+	go tool cover -html=coverage.out -o coverage.html
+	open coverage.html
