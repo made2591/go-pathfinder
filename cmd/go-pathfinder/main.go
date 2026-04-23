@@ -1,11 +1,18 @@
+// Command go-pathfinder is the CLI entry point. It parses flags and
+// delegates to the keyboard, solver, metrics, and sim packages.
 package main
 
 import (
 	"flag"
 	"fmt"
 	"os"
-	"strings"
 	"time"
+	"unicode/utf8"
+
+	"github.com/made2591/go-pathfinder/internal/keyboard"
+	"github.com/made2591/go-pathfinder/internal/metrics"
+	"github.com/made2591/go-pathfinder/internal/sim"
+	"github.com/made2591/go-pathfinder/internal/solver"
 )
 
 func main() {
@@ -14,12 +21,12 @@ func main() {
 	algoName := flag.String("algo", "dijkstra", "pathfinding algorithm (dijkstra, astar)")
 	text := flag.String("text", "", "text to type; if empty only the layout is rendered")
 	verbose := flag.Bool("v", false, "print every move with running cursor state")
-	sim := flag.Bool("sim", false, "animate the cursor typing the text in-place (requires -text)")
+	simFlag := flag.Bool("sim", false, "animate the cursor typing the text in-place (requires -text)")
 	speedMs := flag.Int("speed", 250, "per-step delay in milliseconds for -sim mode (0 = no delay)")
-	metrics := flag.Bool("metrics", false, "print entropy, dispersion, diameter and typing-complexity metrics alongside -text output")
+	showMetrics := flag.Bool("metrics", false, "print entropy, dispersion, diameter and typing-complexity metrics alongside -text output")
 	flag.Parse()
 
-	if *sim {
+	if *simFlag {
 		speed := time.Duration(*speedMs) * time.Millisecond
 		if err := runSimCLI(*layoutName, *wrapName, *algoName, *text, speed); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
@@ -28,39 +35,25 @@ func main() {
 		return
 	}
 
-	if err := run(*layoutName, *wrapName, *algoName, *text, *verbose, *metrics); err != nil {
+	if err := run(*layoutName, *wrapName, *algoName, *text, *verbose, *showMetrics); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
 }
 
-// parseWrap converts a flag string to a WrapMode. Empty string means "use layout default".
-func parseWrap(s string) (WrapMode, bool, error) {
-	switch strings.ToLower(s) {
-	case "":
-		return WrapNone, false, nil
-	case "none":
-		return WrapNone, true, nil
-	case "row":
-		return WrapRow, true, nil
-	case "grid":
-		return WrapGrid, true, nil
-	default:
-		return WrapNone, false, fmt.Errorf("unknown wrap policy %q (valid: none, row, grid)", s)
-	}
-}
-
-func run(layoutName, wrapName, algoName, text string, verbose bool, showMetrics bool) error {
-	layout, err := loadLayout(layoutName)
+func run(layoutName, wrapName, algoName, text string, verbose, showMetrics bool) error {
+	layout, err := keyboard.LoadLayout(layoutName)
 	if err != nil {
 		return err
 	}
-	if wrap, override, err := parseWrap(wrapName); err != nil {
+	wrap, override, err := keyboard.ParseWrap(wrapName)
+	if err != nil {
 		return err
-	} else if override {
+	}
+	if override {
 		layout.Wrap = wrap
 	}
-	finder, err := loadFinder(algoName)
+	finder, err := solver.LoadFinder(algoName)
 	if err != nil {
 		return err
 	}
@@ -78,9 +71,10 @@ func run(layoutName, wrapName, algoName, text string, verbose bool, showMetrics 
 	}
 
 	fmt.Printf("\nlayout: %s | algo: %s | text: %q\n", layout.Name, finder.Name(), text)
-	fmt.Printf("clicks (= password cost): %d  (%.2f per character)\n", len(plan), float64(len(plan))/float64(countRunes(text)))
+	fmt.Printf("clicks (= password cost): %d  (%.2f per character)\n",
+		len(plan), float64(len(plan))/float64(utf8.RuneCountInString(text)))
 	if showMetrics {
-		printMetrics(text, layout, len(plan))
+		metrics.PrintMetrics(text, layout, len(plan))
 	}
 
 	if !verbose {
@@ -88,9 +82,10 @@ func run(layoutName, wrapName, algoName, text string, verbose bool, showMetrics 
 	}
 	state := layout.Start()
 	for i, step := range plan {
-		su, _ := layout.apply(state, step.Move)
+		su, _ := layout.Apply(state, step.Move)
 		state = su.Next
-		fmt.Printf("  %3d %-2s  layer=%d row=%d col=%d caps=%s", i+1, step.Move, state.Layer, state.Row, state.Col, state.Caps)
+		fmt.Printf("  %3d %-2s  layer=%d row=%d col=%d caps=%s",
+			i+1, step.Move, state.Layer, state.Row, state.Col, state.Caps)
 		if step.Emitted != 0 {
 			fmt.Printf("  emit=%q", step.Emitted)
 		}
@@ -99,31 +94,24 @@ func run(layoutName, wrapName, algoName, text string, verbose bool, showMetrics 
 	return nil
 }
 
-func countRunes(s string) int {
-	n := 0
-	for range s {
-		n++
-	}
-	return n
-}
-
-// runSimCLI resolves the layout and finder then delegates to runSim.
 func runSimCLI(layoutName, wrapName, algoName, text string, speed time.Duration) error {
 	if text == "" {
 		return fmt.Errorf("-sim requires -text to be non-empty")
 	}
-	layout, err := loadLayout(layoutName)
+	layout, err := keyboard.LoadLayout(layoutName)
 	if err != nil {
 		return err
 	}
-	if wrap, override, err := parseWrap(wrapName); err != nil {
+	wrap, override, err := keyboard.ParseWrap(wrapName)
+	if err != nil {
 		return err
-	} else if override {
+	}
+	if override {
 		layout.Wrap = wrap
 	}
-	finder, err := loadFinder(algoName)
+	finder, err := solver.LoadFinder(algoName)
 	if err != nil {
 		return err
 	}
-	return runSim(layout, finder, text, speed)
+	return sim.Run(layout, finder, text, speed)
 }

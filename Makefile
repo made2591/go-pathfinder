@@ -1,7 +1,7 @@
 .PHONY: build test fmt format lint fix run clean coverage coverage-html
 
 build:
-	go build -o go-pathfinder .
+	go build -o go-pathfinder ./cmd/go-pathfinder
 
 test:
 	go test ./... -count=1

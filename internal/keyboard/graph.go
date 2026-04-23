@@ -1,4 +1,4 @@
-package main
+package keyboard
 
 // CapsMode is the three-valued caps-lock state machine.
 type CapsMode int
@@ -44,21 +44,28 @@ type Successor struct {
 	Next State
 }
 
+// Pathfinder searches the state graph for the cheapest sequence of moves that
+// emits the target rune. Implementations live in the solver package.
+type Pathfinder interface {
+	Name() string
+	Find(l *Layout, start State, target rune) ([]Step, State, error)
+}
+
 // Successors returns all valid moves from s and their resulting states.
 // Every edge has uniform cost 1 — a single physical click on the remote.
 func (l *Layout) Successors(s State) []Successor {
 	out := make([]Successor, 0, 5)
 	for m := MoveUp; m <= MoveOK; m++ {
-		if su, ok := l.apply(s, m); ok {
+		if su, ok := l.Apply(s, m); ok {
 			out = append(out, su)
 		}
 	}
 	return out
 }
 
-// apply executes a single move and returns the resulting Successor.
+// Apply executes a single move and returns the resulting Successor.
 // The bool is false when the move is illegal (e.g. moving off-edge with WrapNone).
-func (l *Layout) apply(s State, m Move) (Successor, bool) {
+func (l *Layout) Apply(s State, m Move) (Successor, bool) {
 	if m == MoveOK {
 		return l.applyOK(s)
 	}
@@ -144,6 +151,14 @@ func (l *Layout) move(s State, m Move) (int, int, bool) {
 		r, c = idx/cols, idx%cols
 	}
 	return r, c, true
+}
+
+// MoveCursor exposes the wrap-policy-aware directional move so packages
+// outside keyboard (e.g. metrics for BFS diameter) can reach the same logic
+// without duplicating it. Returns the new (row, col) and whether the move is
+// legal under the active wrap policy.
+func (l *Layout) MoveCursor(s State, m Move) (int, int, bool) {
+	return l.move(s, m)
 }
 
 func clamp(v, lo, hi int) int {

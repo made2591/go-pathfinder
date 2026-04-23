@@ -1,20 +1,16 @@
-package main
+// Package solver provides Pathfinder implementations (Dijkstra and A*) for
+// the keyboard state graph. It depends on keyboard for the graph types.
+package solver
 
 import (
 	"fmt"
 	"slices"
+
+	"github.com/made2591/go-pathfinder/internal/keyboard"
 )
 
-// Pathfinder searches the state graph for the cheapest sequence of moves that
-// emits the target rune. Implementations must return the move sequence and
-// the resulting cursor state (after the final OK that emits the rune).
-type Pathfinder interface {
-	Name() string
-	Find(l *Layout, start State, target rune) ([]Step, State, error)
-}
-
-// loadFinder returns a built-in pathfinder by name.
-func loadFinder(name string) (Pathfinder, error) {
+// LoadFinder returns a built-in pathfinder by name.
+func LoadFinder(name string) (keyboard.Pathfinder, error) {
 	switch name {
 	case "dijkstra":
 		return Dijkstra{}, nil
@@ -27,43 +23,42 @@ func loadFinder(name string) (Pathfinder, error) {
 
 // Dijkstra is the uninformed baseline. Every edge has cost 1, so it is also
 // equivalent to a BFS, but we keep the priority queue so the same scaffold
-// supports non-uniform costs later (e.g. a "long-press" move worth 2 clicks).
+// supports non-uniform costs later.
 type Dijkstra struct{}
 
 func (Dijkstra) Name() string { return "dijkstra" }
 
-func (Dijkstra) Find(l *Layout, start State, target rune) ([]Step, State, error) {
-	return search(l, start, target, func(State) int { return 0 })
+func (Dijkstra) Find(l *keyboard.Layout, start keyboard.State, target rune) ([]keyboard.Step, keyboard.State, error) {
+	return search(l, start, target, func(keyboard.State) int { return 0 })
 }
 
 // AStar is informed by a heuristic that lower-bounds the remaining cost. The
 // default heuristic is the Manhattan distance to the nearest key in the
 // current layer that emits the target (or 0 if the target isn't reachable
-// without a layer switch — a deliberately loose lower bound that we discuss
-// in the companion blog post).
+// without a layer switch — a deliberately loose lower bound).
 type AStar struct {
-	Heuristic func(l *Layout, s State, target rune) int
+	Heuristic func(l *keyboard.Layout, s keyboard.State, target rune) int
 }
 
 func (AStar) Name() string { return "astar" }
 
-func (a AStar) Find(l *Layout, start State, target rune) ([]Step, State, error) {
+func (a AStar) Find(l *keyboard.Layout, start keyboard.State, target rune) ([]keyboard.Step, keyboard.State, error) {
 	h := a.Heuristic
 	if h == nil {
-		h = func(l *Layout, s State, target rune) int { return manhattanInLayer(l, s, target) }
+		h = func(l *keyboard.Layout, s keyboard.State, target rune) int { return manhattanInLayer(l, s, target) }
 	}
-	return search(l, start, target, func(s State) int { return h(l, s, target) })
+	return search(l, start, target, func(s keyboard.State) int { return h(l, s, target) })
 }
 
 // search is the shared core for Dijkstra and A*. Passing h ≡ 0 yields
 // Dijkstra; any admissible h yields A*.
-func search(l *Layout, start State, target rune, h func(State) int) ([]Step, State, error) {
+func search(l *keyboard.Layout, start keyboard.State, target rune, h func(keyboard.State) int) ([]keyboard.Step, keyboard.State, error) {
 	type bp struct {
-		from State
-		step Step
+		from keyboard.State
+		step keyboard.Step
 	}
-	gScore := map[State]int{start: 0}
-	prev := map[State]bp{}
+	gScore := map[keyboard.State]int{start: 0}
+	prev := map[keyboard.State]bp{}
 	open := newMinHeap(func(a, b pqNode) bool { return a.f < b.f })
 	open.Push(pqNode{f: h(start), state: start})
 
@@ -78,7 +73,7 @@ func search(l *Layout, start State, target rune, h func(State) int) ([]Step, Sta
 			}
 			gNew := gScore[cur.state] + 1
 			if su.Step.Emitted == target {
-				path := []Step{su.Step}
+				path := []keyboard.Step{su.Step}
 				for p := cur.state; p != start; {
 					b := prev[p]
 					path = append(path, b.step)
@@ -94,24 +89,23 @@ func search(l *Layout, start State, target rune, h func(State) int) ([]Step, Sta
 			}
 		}
 	}
-	return nil, State{}, fmt.Errorf("rune %q is not typeable on layout %q", target, l.Name)
+	return nil, keyboard.State{}, fmt.Errorf("rune %q is not typeable on layout %q", target, l.Name)
 }
 
 // manhattanInLayer is the default A* heuristic. It returns the Manhattan
 // distance to the nearest key in the current layer that would emit target
 // given the current caps state. Cross-layer cases return 0, which is
-// admissible (every search needs at least one OK click anyway, but we don't
-// claim that here to keep the heuristic simple).
-func manhattanInLayer(l *Layout, s State, target rune) int {
+// admissible.
+func manhattanInLayer(l *keyboard.Layout, s keyboard.State, target rune) int {
 	layer := &l.Layers[s.Layer]
 	best := -1
 	for r, row := range layer.Keys {
 		for c, k := range row {
-			if k.Action != ActionEmit {
+			if k.Action != keyboard.ActionEmit {
 				continue
 			}
 			emits := k.Glyph
-			if s.Caps != CapsOff && k.Shifted != 0 {
+			if s.Caps != keyboard.CapsOff && k.Shifted != 0 {
 				emits = k.Shifted
 			}
 			if emits != target {
@@ -140,7 +134,7 @@ func abs(x int) int {
 
 type pqNode struct {
 	f     int // priority: g + h
-	state State
+	state keyboard.State
 }
 
 type minHeap[T any] struct {

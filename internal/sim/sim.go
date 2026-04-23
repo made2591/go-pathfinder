@@ -1,4 +1,7 @@
-package main
+// Package sim animates the cursor moving on the keyboard one click at a time
+// using ANSI escape codes. Falls back to a static render + verbose log when
+// stdout is not a TTY.
+package sim
 
 import (
 	"fmt"
@@ -8,9 +11,10 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/made2591/go-pathfinder/internal/keyboard"
 )
 
-// isTTY reports whether w is an interactive terminal.
 func isTTY(w *os.File) bool {
 	info, err := w.Stat()
 	if err != nil {
@@ -19,50 +23,39 @@ func isTTY(w *os.File) bool {
 	return (info.Mode() & os.ModeCharDevice) != 0
 }
 
-// simFrame holds all the data needed to render one animation frame.
 type simFrame struct {
-	layout  *Layout
-	state   State
-	typed   string
-	target  string
-	clicks  int
-	flash   flashMode
+	layout *keyboard.Layout
+	state  keyboard.State
+	typed  string
+	target string
+	clicks int
+	flash  flashMode
 }
 
 type flashMode int
 
 const (
 	flashNone  flashMode = iota
-	flashCaps            // highlight caps key (yellow-ish inverse)
+	flashCaps            // highlight caps key (yellow)
 	flashLayer           // highlight layer-switch key
 	flashEmit            // highlight emitted key (green)
 )
 
-// cellWidth is the fixed character width used for every key cell in sim mode.
-// renderCell already produces exactly 3 runes (" x " or "[x]"), so this must
-// stay in sync with renderCell's output width. Changing it is a breaking
-// assumption.
-const cellWidth = 3
-
-// renderSimLayer writes the active layer to w, highlighting the cursor at
-// (curRow, curCol) with ANSI inverse video and optionally applying a flash
-// style to the same cell.
-func renderSimLayer(w io.Writer, layer *Layer, curRow, curCol int, flash flashMode) error {
+// renderSimLayer writes the active layer to w, highlighting the cursor with
+// ANSI inverse video and optionally applying a flash style to the same cell.
+func renderSimLayer(w io.Writer, layer *keyboard.Layer, curRow, curCol int, flash flashMode) error {
 	for r, row := range layer.Keys {
 		var sb strings.Builder
 		sb.WriteString("  ")
 		for c, k := range row {
-			cell := renderCell(k)
+			cell := keyboard.RenderCell(k)
 			if r == curRow && c == curCol {
 				switch flash {
 				case flashEmit:
-					// bright green background
 					fmt.Fprintf(&sb, "\x1b[42;1m%s\x1b[0m", cell)
 				case flashCaps, flashLayer:
-					// bright yellow background
 					fmt.Fprintf(&sb, "\x1b[43;1m%s\x1b[0m", cell)
 				default:
-					// inverse video
 					fmt.Fprintf(&sb, "\x1b[7m%s\x1b[0m", cell)
 				}
 			} else {
@@ -72,8 +65,6 @@ func renderSimLayer(w io.Writer, layer *Layer, curRow, curCol int, flash flashMo
 				sb.WriteByte(' ')
 			}
 		}
-		// pad to fixed width so stale characters from a previous (wider) layer
-		// are overwritten
 		line := sb.String()
 		if _, err := fmt.Fprintf(w, "%s\n", line); err != nil {
 			return err
@@ -82,12 +73,10 @@ func renderSimLayer(w io.Writer, layer *Layer, curRow, curCol int, flash flashMo
 	return nil
 }
 
-// renderStatus writes the single-line status bar.
 func renderStatus(w io.Writer, sf simFrame) error {
 	capsStr := sf.state.Caps.String()
 	layerName := sf.layout.Layers[sf.state.Layer].Name
 
-	// determine next rune to type
 	remaining := []rune(sf.target[len([]rune(sf.typed)):])
 	nextStr := "-"
 	if len(remaining) > 0 {
@@ -106,56 +95,53 @@ func renderStatus(w io.Writer, sf simFrame) error {
 	return err
 }
 
-// planStep associates a Step with the resulting State after that step so the
+// PlanStep associates a Step with the resulting State after that step so the
 // simulator can replay the full sequence without re-running pathfinding.
-type planStep struct {
-	step  Step
-	after State // cursor state after this step
+type PlanStep struct {
+	Step  keyboard.Step
+	After keyboard.State
 }
 
-// buildPlan runs the pathfinder once and returns an annotated step list
-// alongside the full typed string for verification. This is a pure function
-// useful for testing independently of the TTY animation loop.
-func buildPlan(layout *Layout, finder Pathfinder, text string) ([]planStep, error) {
+// BuildPlan runs the pathfinder once and returns an annotated step list. Pure
+// function, useful for testing independently of the TTY animation loop.
+func BuildPlan(layout *keyboard.Layout, finder keyboard.Pathfinder, text string) ([]PlanStep, error) {
 	state := layout.Start()
-	var out []planStep
+	var out []PlanStep
 	for _, ch := range text {
 		steps, end, err := finder.Find(layout, state, ch)
 		if err != nil {
 			return nil, err
 		}
 		for i, s := range steps {
-			var after State
+			var after keyboard.State
 			if i == len(steps)-1 {
 				after = end
 			} else {
-				su, _ := layout.apply(state, s.Move)
+				su, _ := layout.Apply(state, s.Move)
 				after = su.Next
 			}
-			out = append(out, planStep{step: s, after: after})
+			out = append(out, PlanStep{Step: s, After: after})
 			state = after
 		}
 	}
 	return out, nil
 }
 
-// resetTerminal restores visible cursor and default colours.
 func resetTerminal(w *os.File) {
 	fmt.Fprint(w, "\x1b[?25h\x1b[0m")
 }
 
-// runSim animates the cursor moving on the keyboard one click at a time.
-// If stdout is not a TTY it falls back to the static render + verbose log.
-func runSim(layout *Layout, finder Pathfinder, text string, speed time.Duration) error {
+// Run animates the cursor moving on the keyboard one click at a time. If
+// stdout is not a TTY it falls back to the static render + verbose log.
+func Run(layout *keyboard.Layout, finder keyboard.Pathfinder, text string, speed time.Duration) error {
 	tty := isTTY(os.Stdout)
 
-	plan, err := buildPlan(layout, finder, text)
+	plan, err := BuildPlan(layout, finder, text)
 	if err != nil {
 		return err
 	}
 
 	if !tty {
-		// Non-TTY fallback: static render then step log.
 		if err := layout.Render(os.Stdout); err != nil {
 			return err
 		}
@@ -163,11 +149,11 @@ func runSim(layout *Layout, finder Pathfinder, text string, speed time.Duration)
 		typed := ""
 		for i, ps := range plan {
 			fmt.Printf("  %3d %-2s  layer=%d row=%d col=%d caps=%s",
-				i+1, ps.step.Move,
-				ps.after.Layer, ps.after.Row, ps.after.Col, ps.after.Caps)
-			if ps.step.Emitted != 0 {
-				typed += string(ps.step.Emitted)
-				fmt.Printf("  emit=%q", ps.step.Emitted)
+				i+1, ps.Step.Move,
+				ps.After.Layer, ps.After.Row, ps.After.Col, ps.After.Caps)
+			if ps.Step.Emitted != 0 {
+				typed += string(ps.Step.Emitted)
+				fmt.Printf("  emit=%q", ps.Step.Emitted)
 			}
 			fmt.Println()
 		}
@@ -175,8 +161,7 @@ func runSim(layout *Layout, finder Pathfinder, text string, speed time.Duration)
 		return nil
 	}
 
-	// TTY path: hide cursor, set up cleanup on exit and SIGINT.
-	fmt.Fprint(os.Stdout, "\x1b[?25l") // hide cursor
+	fmt.Fprint(os.Stdout, "\x1b[?25l")
 	defer resetTerminal(os.Stdout)
 
 	sigCh := make(chan os.Signal, 1)
@@ -187,7 +172,6 @@ func runSim(layout *Layout, finder Pathfinder, text string, speed time.Duration)
 		os.Exit(130)
 	}()
 
-	// First frame: clear screen.
 	fmt.Fprint(os.Stdout, "\x1b[2J\x1b[H")
 
 	state := layout.Start()
@@ -195,7 +179,7 @@ func runSim(layout *Layout, finder Pathfinder, text string, speed time.Duration)
 	clicks := 0
 
 	drawFrame := func(flash flashMode) error {
-		fmt.Fprint(os.Stdout, "\x1b[H") // move cursor to top-left
+		fmt.Fprint(os.Stdout, "\x1b[H")
 		sf := simFrame{
 			layout: layout,
 			state:  state,
@@ -211,7 +195,6 @@ func runSim(layout *Layout, finder Pathfinder, text string, speed time.Duration)
 		return renderSimLayer(os.Stdout, layer, state.Row, state.Col, flash)
 	}
 
-	// Draw initial frame before any moves.
 	if err := drawFrame(flashNone); err != nil {
 		return err
 	}
@@ -227,28 +210,25 @@ func runSim(layout *Layout, finder Pathfinder, text string, speed time.Duration)
 	for _, ps := range plan {
 		clicks++
 
-		// Determine flash style for this OK press.
 		fm := flashNone
-		if ps.step.Move == MoveOK {
+		if ps.Step.Move == keyboard.MoveOK {
 			k := layout.Layers[state.Layer].Keys[state.Row][state.Col]
 			switch k.Action {
-			case ActionEmit:
+			case keyboard.ActionEmit:
 				fm = flashEmit
-			case ActionToggleCaps:
+			case keyboard.ActionToggleCaps:
 				fm = flashCaps
-			case ActionSwitchLayer:
+			case keyboard.ActionSwitchLayer:
 				fm = flashLayer
 			}
 		}
 
-		// Update logical state first.
-		state = ps.after
-		if ps.step.Emitted != 0 {
-			typed += string(ps.step.Emitted)
+		state = ps.After
+		if ps.Step.Emitted != 0 {
+			typed += string(ps.Step.Emitted)
 		}
 
 		if fm != flashNone && speed > 0 {
-			// Flash: draw with highlight, wait, then redraw normal.
 			if err := drawFrame(fm); err != nil {
 				return err
 			}
@@ -264,7 +244,6 @@ func runSim(layout *Layout, finder Pathfinder, text string, speed time.Duration)
 		}
 	}
 
-	// Final status line below the keyboard.
 	fmt.Fprintf(os.Stdout, "\ndone — typed: %q  total clicks: %d\n", typed, clicks)
 	return nil
 }

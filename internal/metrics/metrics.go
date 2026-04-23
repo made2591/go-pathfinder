@@ -1,8 +1,13 @@
-package main
+// Package metrics implements the typing-complexity numbers from the
+// companion blog post: Shannon entropy H, topological dispersion T, layer
+// diameter D_L, and the combined Psi score H * (T / D_L) / (cost / |s|).
+package metrics
 
 import (
 	"fmt"
 	"math"
+
+	"github.com/made2591/go-pathfinder/internal/keyboard"
 )
 
 // Entropy returns the Shannon entropy of the empirical character distribution
@@ -31,21 +36,18 @@ func Entropy(s string) float64 {
 //
 // For a character not present on layer 0 (e.g. a digit on QWERTY's letters
 // layer), the character pair is skipped and does not contribute to the mean.
-// This is documented behaviour: the function comment says "skipped" and the
-// caller sees a mean over only the pairs that are resolvable on layer 0.
-func Dispersion(s string, l *Layout) float64 {
+// Only Glyph is considered; Shifted is intentionally ignored.
+func Dispersion(s string, l *keyboard.Layout) float64 {
 	runes := []rune(s)
 	if len(runes) < 2 {
 		return 0
 	}
 
-	// Build a position map for layer 0: glyph → (row, col).
 	layer := &l.Layers[0]
 	pos := make(map[rune][2]int)
 	for r, row := range layer.Keys {
 		for c, k := range row {
-			if k.Action == ActionEmit {
-				// Only map Glyph; Shifted is intentionally ignored per spec.
+			if k.Action == keyboard.ActionEmit {
 				if _, exists := pos[k.Glyph]; !exists {
 					pos[k.Glyph] = [2]int{r, c}
 				}
@@ -60,7 +62,7 @@ func Dispersion(s string, l *Layout) float64 {
 		pa, aOk := pos[a]
 		pb, bOk := pos[b]
 		if !aOk || !bOk {
-			continue // skip pairs where either character is absent on layer 0
+			continue
 		}
 		d := math.Abs(float64(pa[0]-pb[0])) + math.Abs(float64(pa[1]-pb[1]))
 		total += d
@@ -75,12 +77,11 @@ func Dispersion(s string, l *Layout) float64 {
 // Diameter returns the BFS diameter of layer 0 under the given wrap mode.
 // Only movement edges (Up/Down/Left/Right) are used; OK is excluded.
 // Each edge has weight 1.
-func Diameter(l *Layout) int {
+func Diameter(l *keyboard.Layout) int {
 	layer := &l.Layers[0]
 	rows, cols := layer.Rows(), layer.Cols()
 	total := rows * cols
 
-	// BFS from every cell; diameter = max eccentricity.
 	idx := func(r, c int) int { return r*cols + c }
 
 	bfs := func(startR, startC int) int {
@@ -97,9 +98,9 @@ func Diameter(l *Layout) int {
 			cur := queue[0]
 			queue = queue[1:]
 			cr, cc := cur/cols, cur%cols
-			s := State{Layer: 0, Row: cr, Col: cc}
-			for m := MoveUp; m < MoveOK; m++ {
-				nr, nc, ok := l.move(s, m)
+			s := keyboard.State{Layer: 0, Row: cr, Col: cc}
+			for m := keyboard.MoveUp; m < keyboard.MoveOK; m++ {
+				nr, nc, ok := l.MoveCursor(s, m)
 				if !ok {
 					continue
 				}
@@ -132,9 +133,7 @@ func Diameter(l *Layout) int {
 }
 
 // Psi computes the typing complexity metric: H * (T / D_L) / (cost / |s|).
-// H is Shannon entropy, T is topological dispersion, D_L is the layer-0
-// diameter, and cost is the total click count for typing s.
-func Psi(s string, l *Layout, cost int) float64 {
+func Psi(s string, l *keyboard.Layout, cost int) float64 {
 	h := Entropy(s)
 	t := Dispersion(s, l)
 	dL := float64(Diameter(l))
@@ -146,8 +145,8 @@ func Psi(s string, l *Layout, cost int) float64 {
 	return h * tNorm / costPerChar
 }
 
-// printMetrics writes the article-format metrics block to stdout.
-func printMetrics(text string, l *Layout, cost int) {
+// PrintMetrics writes the article-format metrics block to stdout.
+func PrintMetrics(text string, l *keyboard.Layout, cost int) {
 	h := Entropy(text)
 	t := Dispersion(text, l)
 	dL := Diameter(l)

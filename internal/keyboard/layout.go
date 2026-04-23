@@ -1,4 +1,8 @@
-package main
+// Package keyboard models on-screen TV-remote keyboards as a state graph
+// and exposes the types the rest of the project builds on: layouts, layers,
+// keys, the cursor state, and the Pathfinder interface that solvers
+// implement.
+package keyboard
 
 import (
 	"fmt"
@@ -90,7 +94,7 @@ func (l *Layout) Render(w io.Writer) error {
 		for _, row := range layer.Keys {
 			cells := make([]string, len(row))
 			for c, k := range row {
-				cells[c] = renderCell(k)
+				cells[c] = RenderCell(k)
 			}
 			if _, err := fmt.Fprintf(w, "  %s\n", strings.Join(cells, " ")); err != nil {
 				return err
@@ -100,7 +104,9 @@ func (l *Layout) Render(w io.Writer) error {
 	return nil
 }
 
-func renderCell(k Key) string {
+// RenderCell formats a single key as a 3-character cell. Exported so the
+// animated simulator can reuse the exact same rendering.
+func RenderCell(k Key) string {
 	switch k.Action {
 	case ActionToggleCaps:
 		return fmt.Sprintf("[%s]", orDefault(k.Label, "⇧"))
@@ -121,8 +127,26 @@ func orDefault(s, d string) string {
 	return s
 }
 
-// loadLayout returns a built-in layout by name.
-func loadLayout(name string) (*Layout, error) {
+// ParseWrap converts a CLI flag string to a WrapMode. The bool is true when
+// the caller explicitly asked for an override; an empty string means "use
+// the layout's own default".
+func ParseWrap(s string) (WrapMode, bool, error) {
+	switch strings.ToLower(s) {
+	case "":
+		return WrapNone, false, nil
+	case "none":
+		return WrapNone, true, nil
+	case "row":
+		return WrapRow, true, nil
+	case "grid":
+		return WrapGrid, true, nil
+	default:
+		return WrapNone, false, fmt.Errorf("unknown wrap policy %q (valid: none, row, grid)", s)
+	}
+}
+
+// LoadLayout returns a built-in layout by name.
+func LoadLayout(name string) (*Layout, error) {
 	switch strings.ToLower(name) {
 	case "qwerty":
 		return qwerty(), nil
@@ -215,13 +239,8 @@ func alphabetical() *Layout {
 	}
 }
 
-// appletv models the Apple-TV-style three-layer single-row keyboard:
-//
-//   - Layer 0 (letters): a–z + [SHIFT] [123] [SPACE]
-//   - Layer 1 (numbers): 0–9 + [#+=] [abc] [SPACE]
-//   - Layer 2 (symbols): punctuation + layer-switch keys
-//
-// Default wrap: WrapRow (Apple TV's always-on horizontal wrap-around).
+// appletv models the Apple-TV-style three-layer single-row keyboard. Default
+// wrap: WrapRow (Apple TV's always-on horizontal wrap-around).
 func appletv() *Layout {
 	const (
 		layerLetters = 0
