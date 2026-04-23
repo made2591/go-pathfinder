@@ -122,8 +122,12 @@ func loadLayout(name string) (*Layout, error) {
 	switch strings.ToLower(name) {
 	case "qwerty":
 		return qwerty(), nil
+	case "alphabetical":
+		return alphabetical(), nil
+	case "appletv":
+		return appletv(), nil
 	default:
-		return nil, fmt.Errorf("unknown layout %q", name)
+		return nil, fmt.Errorf("unknown layout %q (valid: qwerty, alphabetical, appletv)", name)
 	}
 }
 
@@ -184,4 +188,80 @@ func kc(label string) Key { return Key{Action: ActionToggleCaps, Label: label} }
 // ks is a layer-switch key.
 func ks(target int, label string) Key {
 	return Key{Action: ActionSwitchLayer, Target: target, Label: label}
+}
+
+// alphabetical is a 5-row × 6-column single-layer layout found on older TVs
+// and some game consoles. No caps layer, no number/symbol layers. The last
+// four cells of the final row are all space keys. Default wrap: WrapNone.
+func alphabetical() *Layout {
+	letters := Layer{Name: "letters", Keys: [][]Key{
+		{ke('a'), ke('b'), ke('c'), ke('d'), ke('e'), ke('f')},
+		{ke('g'), ke('h'), ke('i'), ke('j'), ke('k'), ke('l')},
+		{ke('m'), ke('n'), ke('o'), ke('p'), ke('q'), ke('r')},
+		{ke('s'), ke('t'), ke('u'), ke('v'), ke('w'), ke('x')},
+		{ke('y'), ke('z'), kp(' '), kp(' '), kp(' '), kp(' ')},
+	}}
+	return &Layout{
+		Name:       "alphabetical",
+		Layers:     []Layer{letters},
+		Wrap:       WrapNone,
+		StartLayer: 0,
+		StartRow:   0,
+		StartCol:   0,
+	}
+}
+
+// appletv models the Apple-TV-style three-layer single-row keyboard:
+//
+//   - Layer 0 (letters): a–z + [SHIFT] [123] [SPACE]
+//   - Layer 1 (numbers): 0–9 + [#+=] [abc] [SPACE]
+//   - Layer 2 (symbols): punctuation + layer-switch keys
+//
+// Default wrap: WrapRow (Apple TV's always-on horizontal wrap-around).
+func appletv() *Layout {
+	const (
+		layerLetters = 0
+		layerNumbers = 1
+		layerSymbols = 2
+	)
+
+	letters := Layer{Name: "letters", Keys: [][]Key{{
+		ke('a'), ke('b'), ke('c'), ke('d'), ke('e'), ke('f'),
+		ke('g'), ke('h'), ke('i'), ke('j'), ke('k'), ke('l'),
+		ke('m'), ke('n'), ke('o'), ke('p'), ke('q'), ke('r'),
+		ke('s'), ke('t'), ke('u'), ke('v'), ke('w'), ke('x'),
+		ke('y'), ke('z'),
+		kc("⇧"),
+		ks(layerNumbers, "123"),
+		kp(' '),
+	}}}
+
+	numbers := Layer{Name: "numbers", Keys: [][]Key{{
+		kp('0'), kp('1'), kp('2'), kp('3'), kp('4'),
+		kp('5'), kp('6'), kp('7'), kp('8'), kp('9'),
+		ks(layerSymbols, "#+="),
+		ks(layerLetters, "abc"),
+		kp(' '),
+	}}}
+
+	symbols := Layer{Name: "symbols", Keys: [][]Key{{
+		kp('.'), kp(','), kp('!'), kp('?'), kp('\''), kp('"'),
+		kp('-'), kp('_'), kp('('), kp(')'), kp('['), kp(']'),
+		kp('{'), kp('}'), kp('<'), kp('>'), kp('/'), kp('\\'),
+		kp('|'), kp('+'), kp('='), kp('*'), kp('&'), kp('^'),
+		kp('%'), kp('$'), kp('#'), kp('@'), kp('~'), kp('`'),
+		kp(':'),
+		ks(layerNumbers, "123"),
+		ks(layerLetters, "abc"),
+		kp(' '),
+	}}}
+
+	return &Layout{
+		Name:       "appletv",
+		Layers:     []Layer{letters, numbers, symbols},
+		Wrap:       WrapRow,
+		StartLayer: layerLetters,
+		StartRow:   0,
+		StartCol:   0,
+	}
 }

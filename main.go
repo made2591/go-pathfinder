@@ -4,11 +4,13 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
 func main() {
-	layoutName := flag.String("layout", "qwerty", "keyboard layout (qwerty)")
+	layoutName := flag.String("layout", "qwerty", "keyboard layout (qwerty, alphabetical, appletv)")
+	wrapName := flag.String("wrap", "", "wrap policy override: none, row, grid (default: use layout's own policy)")
 	algoName := flag.String("algo", "dijkstra", "pathfinding algorithm (dijkstra, astar)")
 	text := flag.String("text", "", "text to type; if empty only the layout is rendered")
 	verbose := flag.Bool("v", false, "print every move with running cursor state")
@@ -18,23 +20,44 @@ func main() {
 
 	if *sim {
 		speed := time.Duration(*speedMs) * time.Millisecond
-		if err := runSimCLI(*layoutName, *algoName, *text, speed); err != nil {
+		if err := runSimCLI(*layoutName, *wrapName, *algoName, *text, speed); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			os.Exit(1)
 		}
 		return
 	}
 
-	if err := run(*layoutName, *algoName, *text, *verbose); err != nil {
+	if err := run(*layoutName, *wrapName, *algoName, *text, *verbose); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
 }
 
-func run(layoutName, algoName, text string, verbose bool) error {
+// parseWrap converts a flag string to a WrapMode. Empty string means "use layout default".
+func parseWrap(s string) (WrapMode, bool, error) {
+	switch strings.ToLower(s) {
+	case "":
+		return WrapNone, false, nil
+	case "none":
+		return WrapNone, true, nil
+	case "row":
+		return WrapRow, true, nil
+	case "grid":
+		return WrapGrid, true, nil
+	default:
+		return WrapNone, false, fmt.Errorf("unknown wrap policy %q (valid: none, row, grid)", s)
+	}
+}
+
+func run(layoutName, wrapName, algoName, text string, verbose bool) error {
 	layout, err := loadLayout(layoutName)
 	if err != nil {
 		return err
+	}
+	if wrap, override, err := parseWrap(wrapName); err != nil {
+		return err
+	} else if override {
+		layout.Wrap = wrap
 	}
 	finder, err := loadFinder(algoName)
 	if err != nil {
@@ -81,13 +104,18 @@ func countRunes(s string) int {
 }
 
 // runSimCLI resolves the layout and finder then delegates to runSim.
-func runSimCLI(layoutName, algoName, text string, speed time.Duration) error {
+func runSimCLI(layoutName, wrapName, algoName, text string, speed time.Duration) error {
 	if text == "" {
 		return fmt.Errorf("-sim requires -text to be non-empty")
 	}
 	layout, err := loadLayout(layoutName)
 	if err != nil {
 		return err
+	}
+	if wrap, override, err := parseWrap(wrapName); err != nil {
+		return err
+	} else if override {
+		layout.Wrap = wrap
 	}
 	finder, err := loadFinder(algoName)
 	if err != nil {
