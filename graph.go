@@ -1,13 +1,34 @@
 package main
 
+// CapsMode is the three-valued caps-lock state machine.
+type CapsMode int
+
+const (
+	CapsOff     CapsMode = iota // no caps active
+	CapsOneShot                 // consumed by the next emit that has a Shifted variant
+	CapsSticky                  // stays on until toggled off again
+)
+
+// String returns a human-readable label for display.
+func (c CapsMode) String() string {
+	switch c {
+	case CapsOneShot:
+		return "one-shot"
+	case CapsSticky:
+		return "sticky"
+	default:
+		return "off"
+	}
+}
+
 // State is a node in the typing graph: the cursor position plus the caps-lock
-// flag. Two states with the same (layer, row, col) but different Caps are
+// state. Two states with the same (layer, row, col) but different Caps are
 // distinct nodes because they emit different runes when OK is pressed.
 type State struct {
 	Layer int
 	Row   int
 	Col   int
-	Caps  bool
+	Caps  CapsMode
 }
 
 // Step is a single edge traversal in the graph. Emitted is non-zero only when
@@ -56,13 +77,27 @@ func (l *Layout) applyOK(s State) (Successor, bool) {
 	switch k.Action {
 	case ActionEmit:
 		r := k.Glyph
-		if s.Caps && k.Shifted != 0 {
+		nextCaps := s.Caps
+		if s.Caps != CapsOff && k.Shifted != 0 {
 			r = k.Shifted
+			if s.Caps == CapsOneShot {
+				nextCaps = CapsOff // consumed
+			}
+			// CapsSticky stays unchanged
 		}
-		return Successor{Step: Step{Move: MoveOK, Emitted: r}, Next: s}, true
+		ns := s
+		ns.Caps = nextCaps
+		return Successor{Step: Step{Move: MoveOK, Emitted: r}, Next: ns}, true
 	case ActionToggleCaps:
 		ns := s
-		ns.Caps = !s.Caps
+		switch s.Caps {
+		case CapsOff:
+			ns.Caps = CapsOneShot
+		case CapsOneShot:
+			ns.Caps = CapsSticky
+		case CapsSticky:
+			ns.Caps = CapsOff
+		}
 		return Successor{Step: Step{Move: MoveOK}, Next: ns}, true
 	case ActionSwitchLayer:
 		target := &l.Layers[k.Target]

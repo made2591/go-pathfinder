@@ -111,7 +111,7 @@ func manhattanInLayer(l *Layout, s State, target rune) int {
 				continue
 			}
 			emits := k.Glyph
-			if s.Caps && k.Shifted != 0 {
+			if s.Caps != CapsOff && k.Shifted != 0 {
 				emits = k.Shifted
 			}
 			if emits != target {

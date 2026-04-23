@@ -48,6 +48,10 @@ const (
 	WrapGrid                 // right-end wrap moves to the first cell of the next row
 )
 
+func (w WrapMode) String() string {
+	return [...]string{"none", "row", "grid"}[w]
+}
+
 // Layer is a 2D grid of keys. All rows are assumed to have the same length.
 type Layer struct {
 	Name string

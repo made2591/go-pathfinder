@@ -84,10 +84,7 @@ func renderSimLayer(w io.Writer, layer *Layer, curRow, curCol int, flash flashMo
 
 // renderStatus writes the single-line status bar.
 func renderStatus(w io.Writer, sf simFrame) error {
-	capsStr := "off"
-	if sf.state.Caps {
-		capsStr = "ON"
-	}
+	capsStr := sf.state.Caps.String()
 	layerName := sf.layout.Layers[sf.state.Layer].Name
 
 	// determine next rune to type
@@ -165,7 +162,7 @@ func runSim(layout *Layout, finder Pathfinder, text string, speed time.Duration)
 		fmt.Printf("\nclicks: %d\n", len(plan))
 		typed := ""
 		for i, ps := range plan {
-			fmt.Printf("  %3d %-2s  layer=%d row=%d col=%d caps=%v",
+			fmt.Printf("  %3d %-2s  layer=%d row=%d col=%d caps=%s",
 				i+1, ps.step.Move,
 				ps.after.Layer, ps.after.Row, ps.after.Col, ps.after.Caps)
 			if ps.step.Emitted != 0 {
